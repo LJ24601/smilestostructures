@@ -1,0 +1,1194 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SMILES Structure Visualization</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/smiles-drawer@2.1.6/dist/smiles-drawer.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="https://unpkg.com/openchemlib/dist/openchemlib-full.js"></script>
+  <script src="https://unpkg.com/@rdkit/rdkit/dist/RDKit_minimal.js"></script>
+  <style>
+    :root {
+      --bg: #f5f8ff;
+      --ink: #0b132b;
+      --accent: #0f6fff;
+      --accent-2: #11b5ae;
+      --muted: #56607a;
+      --card: #ffffff;
+      --danger: #b42318;
+      --ok: #027a48;
+      --ring: rgba(15, 111, 255, 0.25);
+      --shadow: 0 14px 40px rgba(11, 19, 43, 0.12);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: 'Space Grotesk', sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 12% 16%, rgba(110, 231, 183, 0.28) 0%, rgba(110, 231, 183, 0) 40%),
+        radial-gradient(circle at 86% 20%, rgba(167, 243, 208, 0.32) 0%, rgba(167, 243, 208, 0) 45%),
+        linear-gradient(180deg, #f2fff6 0%, #e8f9ef 100%);
+      min-height: 100vh;
+    }
+
+    .binary-bg {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      pointer-events: none;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 12% 16%, rgba(16, 185, 129, 0.14) 0%, rgba(16, 185, 129, 0) 42%),
+        radial-gradient(circle at 86% 20%, rgba(34, 211, 238, 0.12) 0%, rgba(34, 211, 238, 0) 46%),
+        linear-gradient(180deg, #03110a 0%, #06150d 100%);
+    }
+
+    .binary-rain {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+    }
+
+    .binary-col {
+      position: absolute;
+      top: -120%;
+      margin: 0;
+      white-space: pre;
+      font: 500 12px/1 'IBM Plex Mono', monospace;
+      letter-spacing: 0.03em;
+      line-height: 1.02;
+      color: rgba(134, 239, 172, 0.2);
+      user-select: none;
+      text-shadow: 0 0 8px rgba(74, 222, 128, 0.18);
+      animation: matrix-drop linear infinite;
+    }
+
+    .binary-col.alt {
+      color: rgba(103, 232, 249, 0.13);
+      text-shadow: 0 0 10px rgba(34, 211, 238, 0.15);
+    }
+
+    @keyframes matrix-drop {
+      from { transform: translateY(0); }
+      to { transform: translateY(260%); }
+    }
+
+    .container {
+      width: min(1240px, calc(100vw - 2rem));
+      margin: 1rem auto 2rem;
+      display: grid;
+      gap: 1rem;
+      position: relative;
+      z-index: 2;
+    }
+
+    .panel {
+      background: color-mix(in oklab, var(--card) 94%, #ffffff 6%);
+      border: 1px solid rgba(11, 19, 43, 0.08);
+      border-radius: 18px;
+      padding: 1rem;
+      box-shadow: var(--shadow);
+    }
+
+    .tracker {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem 0.7rem;
+      align-items: center;
+      margin-left: auto;
+      color: #1a2f58;
+      font: 600 0.8rem/1.1 'IBM Plex Mono', monospace;
+    }
+
+    .tracker .chip {
+      border-radius: 999px;
+      padding: 0.28rem 0.62rem;
+      background: rgba(15, 111, 255, 0.12);
+      border: 1px solid rgba(15, 111, 255, 0.2);
+      white-space: nowrap;
+    }
+
+    h1 {
+      margin: 0 0 0.3rem;
+      font-size: clamp(1.4rem, 2.6vw, 2.2rem);
+      line-height: 1.1;
+      letter-spacing: 0.01em;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: 1.1rem;
+    }
+
+    .lead {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    .tab-btn {
+      border: 1px solid rgba(11, 19, 43, 0.2);
+      border-radius: 999px;
+      padding: 0.5rem 0.95rem;
+      font: 600 0.9rem/1 'Space Grotesk', sans-serif;
+      cursor: pointer;
+      color: var(--ink);
+      background: #fff;
+      transition: all 110ms ease;
+    }
+
+    .tab-btn.active {
+      color: #fff;
+      border-color: transparent;
+      background: linear-gradient(90deg, var(--accent), #0061e8);
+      box-shadow: 0 8px 20px rgba(15, 111, 255, 0.3);
+    }
+
+    .tab-content { display: none; }
+    .tab-content.active { display: grid; gap: 0.9rem; }
+
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.65rem;
+      align-items: center;
+    }
+
+    .file-btn,
+    button {
+      border: 0;
+      border-radius: 999px;
+      padding: 0.55rem 0.95rem;
+      font: 600 0.9rem/1 'Space Grotesk', sans-serif;
+      cursor: pointer;
+      color: #fff;
+      background: linear-gradient(90deg, var(--accent), #0061e8);
+      transition: transform 110ms ease, box-shadow 110ms ease, opacity 110ms ease;
+      box-shadow: 0 8px 20px rgba(15, 111, 255, 0.3);
+    }
+
+    button.secondary,
+    .file-btn.secondary {
+      background: linear-gradient(90deg, #0e7f79, var(--accent-2));
+      box-shadow: 0 8px 20px rgba(17, 181, 174, 0.3);
+    }
+
+    button.ghost {
+      color: var(--ink);
+      background: #fff;
+      border: 1px solid rgba(11, 19, 43, 0.2);
+      box-shadow: none;
+    }
+
+    button:hover,
+    .file-btn:hover,
+    .tab-btn:hover { transform: translateY(-1px); }
+
+    button:disabled,
+    .file-btn.disabled {
+      cursor: not-allowed;
+      opacity: 0.45;
+      transform: none;
+      box-shadow: none;
+      pointer-events: none;
+    }
+
+    input[type="file"] { display: none; }
+
+    .mapping-grid {
+      display: grid;
+      gap: 0.8rem;
+      grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    }
+
+    label {
+      display: grid;
+      gap: 0.35rem;
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+
+    select,
+    input[type="text"],
+    input[type="password"] {
+      border: 1px solid rgba(11, 19, 43, 0.2);
+      border-radius: 10px;
+      padding: 0.55rem 0.6rem;
+      font: 500 0.9rem/1.2 'IBM Plex Mono', monospace;
+      color: var(--ink);
+      background: #fff;
+    }
+
+    select:focus,
+    input[type="text"]:focus,
+    input[type="password"]:focus,
+    button:focus-visible,
+    .tab-btn:focus-visible {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 4px var(--ring);
+    }
+
+    .hint {
+      margin: 0;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+
+    .status {
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+
+    .checkbox-wrap {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem 0.8rem;
+      padding: 0.7rem;
+      border: 1px dashed rgba(11, 19, 43, 0.2);
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.58);
+      min-height: 46px;
+    }
+
+    .checkbox-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      font-size: 0.85rem;
+      color: var(--ink);
+    }
+
+    .stats {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.8rem;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .stats strong { color: var(--ink); }
+    .warn {
+      color: #9a3412;
+      font-size: 0.9rem;
+    }
+    .pager select {
+      min-width: 78px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+      gap: 0.9rem;
+    }
+
+    .card {
+      border: 1px solid rgba(11, 19, 43, 0.12);
+      border-radius: 14px;
+      background: #fff;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      overflow: hidden;
+      opacity: 0;
+      transform: translateY(8px);
+      animation: rise 280ms ease forwards;
+    }
+
+    @keyframes rise { to { opacity: 1; transform: translateY(0); } }
+
+    .card.invalid {
+      border-color: rgba(180, 35, 24, 0.35);
+      background: #fff4f2;
+    }
+
+    .card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.4rem;
+      border-bottom: 1px solid rgba(11, 19, 43, 0.08);
+      padding: 0.6rem 0.65rem;
+    }
+
+    .card-index {
+      font: 600 0.78rem/1 'IBM Plex Mono', monospace;
+      color: var(--muted);
+    }
+
+    .badge {
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      border-radius: 999px;
+      padding: 0.2rem 0.45rem;
+    }
+
+    .badge.ok { background: rgba(2, 122, 72, 0.12); color: var(--ok); }
+    .badge.bad { background: rgba(180, 35, 24, 0.14); color: var(--danger); }
+
+    .select-wrap {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      font-size: 0.83rem;
+      color: var(--muted);
+    }
+
+    .mol {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 170px;
+      padding: 0.45rem;
+      background: linear-gradient(180deg, #f9fbff 0%, #ffffff 100%);
+    }
+
+    .mol svg,
+    .mol canvas {
+      max-width: 100%;
+      height: auto;
+    }
+
+    .meta {
+      border-top: 1px solid rgba(11, 19, 43, 0.08);
+      padding: 0.55rem 0.65rem 0.75rem;
+      display: grid;
+      gap: 0.25rem;
+      font-size: 0.8rem;
+    }
+
+    .meta-row {
+      display: flex;
+      gap: 0.4rem;
+      align-items: baseline;
+    }
+
+    .meta-key {
+      color: var(--muted);
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 0.74rem;
+      min-width: 68px;
+    }
+
+    .meta-val {
+      color: #152042;
+      font-family: 'IBM Plex Mono', monospace;
+      word-break: break-all;
+    }
+
+    .empty {
+      color: var(--muted);
+      text-align: center;
+      padding: 1.2rem;
+      border: 1px dashed rgba(11, 19, 43, 0.2);
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.55);
+    }
+
+    @media (max-width: 720px) {
+      .container { width: min(1240px, calc(100vw - 1rem)); }
+      .panel { padding: 0.8rem; }
+      .mol { min-height: 145px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="binaryBg" class="binary-bg" aria-hidden="true"></div>
+
+  <main id="appShell" class="container">
+    <section class="panel">
+      <div class="row">
+        <div>
+          <h1>SMILES Structure Visualization</h1>
+          <p class="lead">Upload a CSV, map columns for SMILES and ChEMBL ID, choose extra tags, then visualize and export selected molecules.</p>
+        </div>
+        <div id="tracker" class="tracker">
+          <span id="globalViews" class="chip">total_visits: -</span>
+          <span id="visitorCountry" class="chip">country: - (visits: -)</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="upload">Upload &amp; Mapping</button>
+        <button class="tab-btn" data-tab="viz">Visualization</button>
+      </div>
+    </section>
+
+    <section id="tab-upload" class="panel tab-content active">
+      <h2>1) Upload CSV and map columns</h2>
+      <div class="row">
+        <label class="file-btn secondary" for="fileInput">Upload CSV</label>
+        <input id="fileInput" type="file" accept=".csv,.tsv,.txt" />
+        <span id="fileStatus" class="status">No file loaded.</span>
+      </div>
+
+      <div class="mapping-grid">
+        <label>
+          SMILES column
+          <select id="smilesColSelect" disabled>
+            <option value="">Select SMILES column</option>
+          </select>
+        </label>
+
+        <label>
+          ChEMBL ID column
+          <select id="chemblColSelect" disabled>
+            <option value="">Select ChEMBL ID column</option>
+          </select>
+        </label>
+      </div>
+
+      <label>
+        Extra tag columns to show on cards
+        <div id="tagColumns" class="checkbox-wrap"></div>
+      </label>
+
+      <label>
+        Manually add more tag column names (comma-separated)
+        <input id="manualTagInput" type="text" placeholder="e.g. target, pchembl_value, activity_type" disabled />
+      </label>
+
+      <p class="hint">Manual tags must match existing CSV headers. Unknown names are ignored.</p>
+
+      <div class="row">
+        <button id="buildBtn" disabled>Build Visualization Data</button>
+      </div>
+    </section>
+
+    <section id="tab-viz" class="panel tab-content">
+      <h2>2) Visualize, pick, and export</h2>
+      <div id="rendererStatus" class="status"></div>
+      <div class="row">
+        <button id="selectAllBtn" class="ghost" disabled>Select All Valid</button>
+        <button id="deselectAllBtn" class="ghost" disabled>Clear Selection</button>
+        <button id="exportSmiBtn" disabled>Export .smi</button>
+        <button id="exportCsvBtn" class="secondary" disabled>Export .csv</button>
+        <button id="exportJsonBtn" class="ghost" disabled>Export .json</button>
+      </div>
+      <div class="row pager">
+        <button id="prevPageBtn" class="ghost" disabled>Prev Page</button>
+        <button id="nextPageBtn" class="ghost" disabled>Next Page</button>
+        <label>
+          Page size
+          <select id="pageSizeSelect">
+            <option value="40">40</option>
+            <option value="80" selected>80</option>
+            <option value="120">120</option>
+            <option value="200">200</option>
+          </select>
+        </label>
+        <span id="pageInfo" class="status">Page 1 / 1</span>
+      </div>
+      <div class="stats" id="stats">
+        <span><strong>0</strong> loaded</span>
+        <span><strong>0</strong> valid</span>
+        <span><strong>0</strong> selected</span>
+      </div>
+      <div id="results" class="empty">No visualization built yet. Go to Upload &amp; Mapping first.</div>
+    </section>
+  </main>
+
+  <script>
+    const binaryBg = document.getElementById('binaryBg');
+    const globalViews = document.getElementById('globalViews');
+    const visitorCountry = document.getElementById('visitorCountry');
+
+    const tabButtons = Array.from(document.querySelectorAll('[data-tab]'));
+    const tabUpload = document.getElementById('tab-upload');
+    const tabViz = document.getElementById('tab-viz');
+
+    const fileInput = document.getElementById('fileInput');
+    const fileStatus = document.getElementById('fileStatus');
+    const smilesColSelect = document.getElementById('smilesColSelect');
+    const chemblColSelect = document.getElementById('chemblColSelect');
+    const tagColumns = document.getElementById('tagColumns');
+    const manualTagInput = document.getElementById('manualTagInput');
+    const buildBtn = document.getElementById('buildBtn');
+
+    const selectAllBtn = document.getElementById('selectAllBtn');
+    const deselectAllBtn = document.getElementById('deselectAllBtn');
+    const exportSmiBtn = document.getElementById('exportSmiBtn');
+    const exportCsvBtn = document.getElementById('exportCsvBtn');
+    const exportJsonBtn = document.getElementById('exportJsonBtn');
+    const rendererStatus = document.getElementById('rendererStatus');
+    const prevPageBtn = document.getElementById('prevPageBtn');
+    const nextPageBtn = document.getElementById('nextPageBtn');
+    const pageInfo = document.getElementById('pageInfo');
+    const pageSizeSelect = document.getElementById('pageSizeSelect');
+    const statsEl = document.getElementById('stats');
+    const resultsEl = document.getElementById('results');
+
+    let rawRows = [];
+    let headers = [];
+    let state = [];
+    let selectedTagColumns = [];
+    let currentPage = 1;
+    let pageSize = 80;
+    let rdkitModule = null;
+    let rdkitInitPromise = null;
+
+    function countryCodeToFlag(code) {
+      if (!code || code.length !== 2) return '';
+      const up = code.toUpperCase();
+      const points = [...up].map((c) => 127397 + c.charCodeAt(0));
+      return String.fromCodePoint(...points);
+    }
+
+    function randomBitColumn(length) {
+      const chars = [];
+      for (let i = 0; i < length; i += 1) {
+        chars.push(Math.random() > 0.5 ? '1' : '0');
+      }
+      return chars.join('\n');
+    }
+
+    function initBinaryBackground() {
+      const rebuild = () => {
+        binaryBg.innerHTML = '';
+        const rain = document.createElement('div');
+        rain.className = 'binary-rain';
+
+        const width = window.innerWidth || 1440;
+        const density = Math.max(28, Math.floor(width / 22));
+        for (let i = 0; i < density; i += 1) {
+          const col = document.createElement('pre');
+          col.className = `binary-col ${i % 3 === 0 ? 'alt' : ''}`;
+          col.textContent = randomBitColumn(90 + Math.floor(Math.random() * 80));
+          col.style.left = `${(i / density) * 100}%`;
+          col.style.opacity = `${0.12 + Math.random() * 0.2}`;
+          col.style.animationDuration = `${8 + Math.random() * 12}s`;
+          col.style.animationDelay = `${-Math.random() * 16}s`;
+          rain.append(col);
+        }
+
+        binaryBg.append(rain);
+      };
+
+      rebuild();
+      let timer = null;
+      window.addEventListener('resize', () => {
+        clearTimeout(timer);
+        timer = setTimeout(rebuild, 140);
+      });
+    }
+
+    async function detectCountry() {
+      try {
+        const r = await fetch('https://ipapi.co/json/');
+        if (r.ok) {
+          const data = await r.json();
+          const name = data.country_name || '';
+          const code = (data.country_code || data.country || '').toUpperCase();
+          if (name || code) return { name: name || code, code };
+        }
+      } catch (_) {}
+      try {
+        const r = await fetch('https://ipwho.is/');
+        if (r.ok) {
+          const data = await r.json();
+          if (data && data.success && data.country) {
+            return { name: data.country, code: (data.country_code || '').toUpperCase() };
+          }
+        }
+      } catch (_) {}
+      return { name: 'Unknown', code: '' };
+    }
+
+    async function trackVisitStats() {
+      globalViews.textContent = 'total_visits: loading...';
+      try {
+        const r = await fetch('https://api.countapi.xyz/hit/smiles-structure-picker/main');
+        if (r.ok) {
+          const data = await r.json();
+          globalViews.textContent = `total_visits: ${data.value}`;
+        } else {
+          globalViews.textContent = 'total_visits: n/a';
+        }
+      } catch (_) {
+        globalViews.textContent = 'total_visits: n/a';
+      }
+
+      visitorCountry.textContent = 'country: locating...';
+      const country = await detectCountry();
+      const code = (country.code || '').toLowerCase();
+      const flag = countryCodeToFlag(country.code);
+      let usage = 'n/a';
+      if (code) {
+        try {
+          const r = await fetch(`https://api.countapi.xyz/hit/smiles-structure-picker/country-${code}`);
+          if (r.ok) {
+            const data = await r.json();
+            usage = String(data.value);
+          }
+        } catch (_) {}
+      }
+      visitorCountry.textContent = `country: ${flag ? `${flag} ` : ''}${country.name} (visits: ${usage})`;
+    }
+
+    function switchTab(name) {
+      tabButtons.forEach((btn) => {
+        btn.classList.toggle('active', btn.dataset.tab === name);
+      });
+      tabUpload.classList.toggle('active', name === 'upload');
+      tabViz.classList.toggle('active', name === 'viz');
+    }
+
+    tabButtons.forEach((btn) => {
+      btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+    });
+
+    function normValue(v) {
+      if (v === null || v === undefined) return '';
+      return String(v).trim();
+    }
+
+    function normalizeSmiles(v) {
+      const s = normValue(v).replace(/\s+/g, '');
+      return s.replace(/^["'`]+|["'`]+$/g, '');
+    }
+
+    function bestRenderSmiles(smiles) {
+      const clean = normalizeSmiles(smiles);
+      if (!clean.includes('.')) return clean;
+      const fragments = clean.split('.').filter(Boolean);
+      if (!fragments.length) return clean;
+      fragments.sort((a, b) => b.length - a.length);
+      return fragments[0];
+    }
+
+    function guessHeader(fields, candidates) {
+      const lower = fields.map((x) => x.toLowerCase());
+      const idx = lower.findIndex((x) => candidates.some((c) => x === c || x.includes(c)));
+      return idx >= 0 ? fields[idx] : '';
+    }
+
+    function fillSelect(selectEl, fields, placeholder) {
+      selectEl.innerHTML = '';
+      const ph = document.createElement('option');
+      ph.value = '';
+      ph.textContent = placeholder;
+      selectEl.append(ph);
+      fields.forEach((h) => {
+        const opt = document.createElement('option');
+        opt.value = h;
+        opt.textContent = h;
+        selectEl.append(opt);
+      });
+      selectEl.disabled = false;
+    }
+
+    function renderTagChoices(fields) {
+      tagColumns.innerHTML = '';
+      if (!fields.length) {
+        tagColumns.textContent = 'No columns available yet.';
+        return;
+      }
+      fields.forEach((h) => {
+        const item = document.createElement('label');
+        item.className = 'checkbox-item';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.value = h;
+        cb.addEventListener('change', syncTagColumns);
+        item.append(cb, document.createTextNode(h));
+        tagColumns.append(item);
+      });
+    }
+
+    function syncTagColumns() {
+      const checked = Array.from(tagColumns.querySelectorAll('input[type="checkbox"]:checked')).map((x) => x.value);
+      selectedTagColumns = checked;
+    }
+
+    function uniquePreserveOrder(items) {
+      const seen = new Set();
+      const out = [];
+      items.forEach((item) => {
+        const key = item.toLowerCase();
+        if (!seen.has(key)) {
+          seen.add(key);
+          out.push(item);
+        }
+      });
+      return out;
+    }
+
+    function parseManualTags(text) {
+      return uniquePreserveOrder(
+        text
+          .split(',')
+          .map((x) => x.trim())
+          .filter(Boolean)
+          .filter((x) => headers.some((h) => h.toLowerCase() === x.toLowerCase()))
+          .map((x) => headers.find((h) => h.toLowerCase() === x.toLowerCase()))
+      );
+    }
+
+    function updateStats() {
+      const total = state.length;
+      const valid = state.filter((x) => x.valid).length;
+      const selected = state.filter((x) => x.valid && x.selected).length;
+
+      statsEl.innerHTML = `
+        <span><strong>${total}</strong> loaded</span>
+        <span><strong>${valid}</strong> valid</span>
+        <span><strong>${selected}</strong> selected</span>
+      `;
+
+      const hasRows = total > 0;
+      const hasSelected = selected > 0;
+      selectAllBtn.disabled = !hasRows;
+      deselectAllBtn.disabled = !hasRows;
+      exportSmiBtn.disabled = !hasSelected;
+      exportCsvBtn.disabled = !hasSelected;
+      exportJsonBtn.disabled = !hasSelected;
+    }
+
+    function hasRenderer() {
+      return (
+        typeof OCL !== 'undefined' ||
+        typeof SmilesDrawer !== 'undefined' ||
+        rdkitModule !== null ||
+        typeof initRDKitModule === 'function'
+      );
+    }
+
+    async function ensureRdkitReady() {
+      if (rdkitModule) return true;
+      if (typeof initRDKitModule !== 'function') return false;
+      if (!rdkitInitPromise) {
+        rdkitInitPromise = initRDKitModule()
+          .then((module) => {
+            rdkitModule = module;
+            return true;
+          })
+          .catch(() => false);
+      }
+      return rdkitInitPromise;
+    }
+
+    function renderWithRdkit(smiles, mountEl) {
+      if (!rdkitModule) return false;
+      try {
+        const mol = rdkitModule.get_mol(smiles);
+        if (!mol) return false;
+        const svg = mol.get_svg();
+        mol.delete();
+        if (!svg || typeof svg !== 'string') return false;
+        mountEl.innerHTML = svg;
+        return true;
+      } catch (_) {
+        return false;
+      }
+    }
+
+    function sampleParseScore(smilesValues, maxN = 40) {
+      const sample = smilesValues.filter(Boolean).slice(0, maxN);
+      let ok = 0;
+      sample.forEach((s) => {
+        const renderSmiles = bestRenderSmiles(s);
+        if (typeof OCL !== 'undefined') {
+          try {
+            OCL.Molecule.fromSmiles(renderSmiles);
+            ok += 1;
+            return;
+          } catch (_) {}
+        }
+        if (rdkitModule) {
+          try {
+            const mol = rdkitModule.get_mol(renderSmiles);
+            if (mol) {
+              mol.delete();
+              ok += 1;
+            }
+          } catch (_) {
+            // ignore; counted as failed parse
+          }
+        }
+      });
+      return { tested: sample.length, ok };
+    }
+
+    function getTotalPages() {
+      return Math.max(1, Math.ceil(state.length / pageSize));
+    }
+
+    function updatePager() {
+      const totalPages = getTotalPages();
+      if (currentPage > totalPages) currentPage = totalPages;
+      if (currentPage < 1) currentPage = 1;
+      pageInfo.textContent = `Page ${currentPage} / ${totalPages}`;
+      prevPageBtn.disabled = state.length === 0 || currentPage <= 1;
+      nextPageBtn.disabled = state.length === 0 || currentPage >= totalPages;
+    }
+
+    function blobDownload(filename, text, mime) {
+      const blob = new Blob([text], { type: mime });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    function createCard(row, idx) {
+      const card = document.createElement('article');
+      card.className = `card ${row.valid ? '' : 'invalid'}`;
+      card.style.animationDelay = `${Math.min(idx * 16, 260)}ms`;
+
+      const head = document.createElement('div');
+      head.className = 'card-head';
+
+      const index = document.createElement('span');
+      index.className = 'card-index';
+      index.textContent = `#${idx + 1}`;
+
+      const status = document.createElement('span');
+      status.className = `badge ${row.valid ? 'ok' : 'bad'}`;
+      status.textContent = row.valid ? 'valid' : 'invalid';
+
+      const boxWrap = document.createElement('label');
+      boxWrap.className = 'select-wrap';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.disabled = !row.valid;
+      checkbox.checked = row.selected;
+      checkbox.addEventListener('change', (e) => {
+        row.selected = e.target.checked;
+        updateStats();
+      });
+      boxWrap.append(checkbox, document.createTextNode('pick'));
+      head.append(index, status, boxWrap);
+
+      const mol = document.createElement('div');
+      mol.className = 'mol';
+      const markInvalid = () => {
+        row.valid = false;
+        row.selected = false;
+        card.classList.add('invalid');
+        status.className = 'badge bad';
+        status.textContent = 'invalid';
+        mol.textContent = 'Cannot render this SMILES.';
+        checkbox.disabled = true;
+        checkbox.checked = false;
+        updateStats();
+      };
+
+      if (row.valid) {
+        if (!hasRenderer()) {
+          mol.textContent = 'Renderer library unavailable in this browser session.';
+        } else {
+        const renderSmiles = bestRenderSmiles(row.smiles);
+        let renderedWithOCL = false;
+
+        if (typeof OCL !== 'undefined') {
+          try {
+            const molecule = OCL.Molecule.fromSmiles(renderSmiles);
+            const svg = molecule.toSVG(230, 170, '', { suppressChiralText: true });
+            mol.innerHTML = svg;
+            renderedWithOCL = true;
+          } catch (_) {
+            renderedWithOCL = false;
+          }
+        }
+
+        if (!renderedWithOCL && typeof SmilesDrawer !== 'undefined') {
+          const canvas = document.createElement('canvas');
+          canvas.width = 230;
+          canvas.height = 170;
+          mol.append(canvas);
+
+          SmilesDrawer.parse(
+            renderSmiles,
+            (tree) => {
+              const drawer = new SmilesDrawer.Drawer({
+                width: 230,
+                height: 170,
+                terminalCarbons: true,
+                compactDrawing: true,
+                atomVisualization: 'default',
+                bondThickness: 1.1,
+              });
+              drawer.draw(tree, canvas, 'light', false);
+            },
+            () => {
+              if (!renderWithRdkit(renderSmiles, mol)) {
+                markInvalid();
+              }
+            }
+          );
+        } else if (!renderedWithOCL) {
+          if (!renderWithRdkit(renderSmiles, mol)) {
+            markInvalid();
+          }
+        }
+        }
+      } else {
+        mol.textContent = 'Missing or invalid SMILES.';
+      }
+
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+
+      const fixed = [['chembl_id', row.chemblId || '-']];
+
+      fixed.forEach(([k, v]) => {
+        const m = document.createElement('div');
+        m.className = 'meta-row';
+        const key = document.createElement('span');
+        key.className = 'meta-key';
+        key.textContent = k;
+        const val = document.createElement('span');
+        val.className = 'meta-val';
+        val.textContent = v;
+        m.append(key, val);
+        meta.append(m);
+      });
+
+      row.tags.forEach((tag) => {
+        const m = document.createElement('div');
+        m.className = 'meta-row';
+        const key = document.createElement('span');
+        key.className = 'meta-key';
+        key.textContent = tag.key;
+        const val = document.createElement('span');
+        val.className = 'meta-val';
+        val.textContent = tag.value || '-';
+        m.append(key, val);
+        meta.append(m);
+      });
+
+      card.append(head, mol, meta);
+      return card;
+    }
+
+    function renderState() {
+      resultsEl.innerHTML = '';
+      if (!state.length) {
+        resultsEl.className = 'empty';
+        resultsEl.textContent = 'No visualization built yet. Go to Upload & Mapping first.';
+        updatePager();
+        updateStats();
+        return;
+      }
+
+      resultsEl.className = 'grid';
+      updatePager();
+      const start = (currentPage - 1) * pageSize;
+      const end = Math.min(start + pageSize, state.length);
+      const visibleRows = state.slice(start, end);
+
+      let cursor = 0;
+      const batch = 20;
+      const drawChunk = () => {
+        const frag = document.createDocumentFragment();
+        const limit = Math.min(cursor + batch, visibleRows.length);
+        for (let i = cursor; i < limit; i += 1) {
+          frag.append(createCard(visibleRows[i], start + i));
+        }
+        resultsEl.append(frag);
+        cursor = limit;
+        if (cursor < visibleRows.length) {
+          requestAnimationFrame(drawChunk);
+        }
+      };
+      drawChunk();
+      updateStats();
+    }
+
+    async function buildVisualizationData() {
+      const smilesCol = smilesColSelect.value;
+      const chemblCol = chemblColSelect.value;
+      if (!smilesCol || !chemblCol) {
+        alert('Please choose both SMILES and ChEMBL ID columns.');
+        return;
+      }
+
+      syncTagColumns();
+      const manualTags = parseManualTags(manualTagInput.value);
+      const tagCols = uniquePreserveOrder([...selectedTagColumns, ...manualTags]).filter(
+        (h) => h !== smilesCol && h !== chemblCol
+      );
+
+      state = rawRows.map((r) => {
+        const smiles = normalizeSmiles(r[smilesCol]);
+        const chemblId = normValue(r[chemblCol]);
+        const tags = tagCols.map((key) => ({ key, value: normValue(r[key]) }));
+        return {
+          sourceRow: r,
+          smiles,
+          chemblId,
+          tags,
+          valid: Boolean(smiles),
+          selected: false,
+        };
+      });
+
+      currentPage = 1;
+      await ensureRdkitReady();
+      if (hasRenderer()) {
+        const score = sampleParseScore(state.map((x) => x.smiles));
+        if (score.tested > 0 && score.ok === 0) {
+          rendererStatus.textContent = `Renderer loaded, but 0/${score.tested} sampled rows parsed. Likely wrong SMILES column or malformed SMILES strings.`;
+          rendererStatus.className = 'warn';
+        } else if (score.tested > 0 && score.ok < Math.ceil(score.tested * 0.2)) {
+          rendererStatus.textContent = `Renderer loaded, but parse success is low (${score.ok}/${score.tested} sampled). Please verify the SMILES column mapping and data format.`;
+          rendererStatus.className = 'warn';
+        } else {
+          rendererStatus.textContent = '';
+          rendererStatus.className = 'status';
+        }
+      } else {
+        rendererStatus.textContent = 'Renderer scripts failed to load. Check network access to jsdelivr/unpkg, then reload.';
+        rendererStatus.className = 'warn';
+      }
+      renderState();
+      switchTab('viz');
+    }
+
+    function setupMappingUI(fields) {
+      headers = fields;
+      fillSelect(smilesColSelect, fields, 'Select SMILES column');
+      fillSelect(chemblColSelect, fields, 'Select ChEMBL ID column');
+      renderTagChoices(fields);
+      manualTagInput.disabled = false;
+      buildBtn.disabled = false;
+
+      const guessedSmiles = guessHeader(fields, ['smiles']);
+      const guessedChembl = guessHeader(fields, ['chembl_id', 'chembl', 'chemblid']);
+      smilesColSelect.value = guessedSmiles || '';
+      chemblColSelect.value = guessedChembl || '';
+    }
+
+    fileInput.addEventListener('change', async (event) => {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+
+      fileStatus.textContent = `Reading ${file.name}...`;
+      const text = await file.text();
+
+      const parsed = Papa.parse(text, {
+        header: true,
+        skipEmptyLines: true,
+        transformHeader: (h) => h.trim(),
+      });
+
+      if (parsed.errors.length) {
+        fileStatus.textContent = `Loaded with ${parsed.errors.length} parse warning(s).`;
+      } else {
+        fileStatus.textContent = `Loaded ${file.name}`;
+      }
+
+      rawRows = parsed.data.filter((row) => Object.values(row).some((v) => normValue(v) !== ''));
+      const fields = parsed.meta.fields || [];
+
+      if (!fields.length || !rawRows.length) {
+        fileStatus.textContent = 'Could not find rows/headers in this file.';
+        return;
+      }
+
+      setupMappingUI(fields);
+      fileStatus.textContent = `Loaded ${rawRows.length} rows with ${fields.length} columns.`;
+      fileInput.value = '';
+    });
+
+    buildBtn.addEventListener('click', buildVisualizationData);
+
+    selectAllBtn.addEventListener('click', () => {
+      state.forEach((x) => {
+        if (x.valid) x.selected = true;
+      });
+      updateStats();
+    });
+
+    deselectAllBtn.addEventListener('click', () => {
+      state.forEach((x) => {
+        x.selected = false;
+      });
+      updateStats();
+    });
+
+    prevPageBtn.addEventListener('click', () => {
+      currentPage -= 1;
+      renderState();
+    });
+
+    nextPageBtn.addEventListener('click', () => {
+      currentPage += 1;
+      renderState();
+    });
+
+    pageSizeSelect.addEventListener('change', () => {
+      pageSize = Number(pageSizeSelect.value) || 80;
+      currentPage = 1;
+      renderState();
+    });
+
+    function getSelectedRows() {
+      return state.filter((x) => x.valid && x.selected);
+    }
+
+    exportSmiBtn.addEventListener('click', () => {
+      const rows = getSelectedRows();
+      if (!rows.length) return;
+      const lines = rows.map((r, i) => `${r.smiles} ${r.chemblId || `mol_${String(i + 1).padStart(4, '0')}`}`);
+      blobDownload('selected_molecules.smi', `${lines.join('\n')}\n`, 'text/plain;charset=utf-8');
+    });
+
+    exportCsvBtn.addEventListener('click', () => {
+      const rows = getSelectedRows();
+      if (!rows.length) return;
+      const headersOut = headers.length ? headers : ['chembl_id', 'smiles'];
+      const lines = [headersOut.join(',')];
+
+      rows.forEach((r) => {
+        const vals = headersOut
+          .map((h) => {
+            if (h === 'chembl_id') return r.chemblId;
+            if (h === 'smiles') return r.smiles;
+            return normValue(r.sourceRow ? r.sourceRow[h] : '');
+          })
+          .map((v) => `"${String(v ?? '').replaceAll('"', '""')}"`);
+        lines.push(vals.join(','));
+      });
+
+      blobDownload('selected_molecules.csv', `${lines.join('\n')}\n`, 'text/csv;charset=utf-8');
+    });
+
+    exportJsonBtn.addEventListener('click', () => {
+      const rows = getSelectedRows();
+      if (!rows.length) return;
+      const out = rows.map((r) => ({
+        chembl_id: r.chemblId,
+        smiles: r.smiles,
+        tags: Object.fromEntries(r.tags.map((t) => [t.key, t.value])),
+      }));
+      blobDownload('selected_molecules.json', `${JSON.stringify(out, null, 2)}\n`, 'application/json;charset=utf-8');
+    });
+
+    initBinaryBackground();
+    trackVisitStats();
+    updatePager();
+    updateStats();
+  </script>
+</body>
+</html>
