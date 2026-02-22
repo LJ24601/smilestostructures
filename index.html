@@ -396,7 +396,7 @@
       <div class="row">
         <div>
           <h1>SMILES Structure Visualization</h1>
-          <p class="lead">Upload a CSV, map columns for SMILES and ChEMBL ID, choose extra tags, then visualize and export selected molecules.</p>
+          <p class="lead">Upload a CSV, map columns for SMILES, then visualize and export selected molecules.</p>
         </div>
       </div>
     </section>
@@ -425,9 +425,9 @@
         </label>
 
         <label>
-          ChEMBL ID column
+          ID column
           <select id="chemblColSelect" disabled>
-            <option value="">Select ChEMBL ID column</option>
+            <option value="">Select ID column</option>
           </select>
         </label>
       </div>
@@ -436,13 +436,6 @@
         Extra tag columns to show on cards
         <div id="tagColumns" class="checkbox-wrap"></div>
       </label>
-
-      <label>
-        Manually add more tag column names (comma-separated)
-        <input id="manualTagInput" type="text" placeholder="e.g. target, pchembl_value, activity_type" disabled />
-      </label>
-
-      <p class="hint">Manual tags must match existing CSV headers. Unknown names are ignored.</p>
 
       <div class="row">
         <button id="buildBtn" disabled>Build Visualization Data</button>
@@ -494,7 +487,6 @@
     const smilesColSelect = document.getElementById('smilesColSelect');
     const chemblColSelect = document.getElementById('chemblColSelect');
     const tagColumns = document.getElementById('tagColumns');
-    const manualTagInput = document.getElementById('manualTagInput');
     const buildBtn = document.getElementById('buildBtn');
 
     const selectAllBtn = document.getElementById('selectAllBtn');
@@ -643,17 +635,6 @@
         }
       });
       return out;
-    }
-
-    function parseManualTags(text) {
-      return uniquePreserveOrder(
-        text
-          .split(',')
-          .map((x) => x.trim())
-          .filter(Boolean)
-          .filter((x) => headers.some((h) => h.toLowerCase() === x.toLowerCase()))
-          .map((x) => headers.find((h) => h.toLowerCase() === x.toLowerCase()))
-      );
     }
 
     function updateStats() {
@@ -865,7 +846,7 @@
       const meta = document.createElement('div');
       meta.className = 'meta';
 
-      const fixed = [['chembl_id', row.chemblId || '-']];
+      const fixed = [['id', row.chemblId || '-']];
 
       fixed.forEach(([k, v]) => {
         const m = document.createElement('div');
@@ -935,13 +916,12 @@
       const smilesCol = smilesColSelect.value;
       const chemblCol = chemblColSelect.value;
       if (!smilesCol || !chemblCol) {
-        alert('Please choose both SMILES and ChEMBL ID columns.');
+        alert('Please choose both SMILES and ID columns.');
         return;
       }
 
       syncTagColumns();
-      const manualTags = parseManualTags(manualTagInput.value);
-      const tagCols = uniquePreserveOrder([...selectedTagColumns, ...manualTags]).filter(
+      const tagCols = uniquePreserveOrder([...selectedTagColumns]).filter(
         (h) => h !== smilesCol && h !== chemblCol
       );
 
@@ -984,13 +964,12 @@
     function setupMappingUI(fields) {
       headers = fields;
       fillSelect(smilesColSelect, fields, 'Select SMILES column');
-      fillSelect(chemblColSelect, fields, 'Select ChEMBL ID column');
+      fillSelect(chemblColSelect, fields, 'Select ID column');
       renderTagChoices(fields);
-      manualTagInput.disabled = false;
       buildBtn.disabled = false;
 
       const guessedSmiles = guessHeader(fields, ['smiles']);
-      const guessedChembl = guessHeader(fields, ['chembl_id', 'chembl', 'chemblid']);
+      const guessedChembl = guessHeader(fields, ['id', 'chembl_id', 'chembl', 'chemblid']);
       smilesColSelect.value = guessedSmiles || '';
       chemblColSelect.value = guessedChembl || '';
     }
@@ -1073,13 +1052,13 @@
     exportCsvBtn.addEventListener('click', () => {
       const rows = getSelectedRows();
       if (!rows.length) return;
-      const headersOut = headers.length ? headers : ['chembl_id', 'smiles'];
+      const headersOut = headers.length ? headers : ['id', 'smiles'];
       const lines = [headersOut.join(',')];
 
       rows.forEach((r) => {
         const vals = headersOut
           .map((h) => {
-            if (h === 'chembl_id') return r.chemblId;
+            if (h === 'id') return r.chemblId;
             if (h === 'smiles') return r.smiles;
             return normValue(r.sourceRow ? r.sourceRow[h] : '');
           })
@@ -1094,7 +1073,7 @@
       const rows = getSelectedRows();
       if (!rows.length) return;
       const out = rows.map((r) => ({
-        chembl_id: r.chemblId,
+        id: r.chemblId,
         smiles: r.smiles,
         tags: Object.fromEntries(r.tags.map((t) => [t.key, t.value])),
       }));
