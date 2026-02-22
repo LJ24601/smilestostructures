@@ -98,24 +98,6 @@
       box-shadow: var(--shadow);
     }
 
-    .tracker {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.45rem 0.7rem;
-      align-items: center;
-      margin-left: auto;
-      color: #1a2f58;
-      font: 600 0.8rem/1.1 'IBM Plex Mono', monospace;
-    }
-
-    .tracker .chip {
-      border-radius: 999px;
-      padding: 0.28rem 0.62rem;
-      background: rgba(15, 111, 255, 0.12);
-      border: 1px solid rgba(15, 111, 255, 0.2);
-      white-space: nowrap;
-    }
-
     h1 {
       margin: 0 0 0.3rem;
       font-size: clamp(1.4rem, 2.6vw, 2.2rem);
@@ -416,10 +398,6 @@
           <h1>SMILES Structure Visualization</h1>
           <p class="lead">Upload a CSV, map columns for SMILES and ChEMBL ID, choose extra tags, then visualize and export selected molecules.</p>
         </div>
-        <div id="tracker" class="tracker">
-          <span id="globalViews" class="chip">total_visits: -</span>
-          <span id="visitorCountry" class="chip">country: - (visits: -)</span>
-        </div>
       </div>
     </section>
 
@@ -506,8 +484,6 @@
 
   <script>
     const binaryBg = document.getElementById('binaryBg');
-    const globalViews = document.getElementById('globalViews');
-    const visitorCountry = document.getElementById('visitorCountry');
 
     const tabButtons = Array.from(document.querySelectorAll('[data-tab]'));
     const tabUpload = document.getElementById('tab-upload');
@@ -542,13 +518,6 @@
     let pageSize = 80;
     let rdkitModule = null;
     let rdkitInitPromise = null;
-
-    function countryCodeToFlag(code) {
-      if (!code || code.length !== 2) return '';
-      const up = code.toUpperCase();
-      const points = [...up].map((c) => 127397 + c.charCodeAt(0));
-      return String.fromCodePoint(...points);
-    }
 
     function randomBitColumn(length) {
       const chars = [];
@@ -586,59 +555,6 @@
         clearTimeout(timer);
         timer = setTimeout(rebuild, 140);
       });
-    }
-
-    async function detectCountry() {
-      try {
-        const r = await fetch('https://ipapi.co/json/');
-        if (r.ok) {
-          const data = await r.json();
-          const name = data.country_name || '';
-          const code = (data.country_code || data.country || '').toUpperCase();
-          if (name || code) return { name: name || code, code };
-        }
-      } catch (_) {}
-      try {
-        const r = await fetch('https://ipwho.is/');
-        if (r.ok) {
-          const data = await r.json();
-          if (data && data.success && data.country) {
-            return { name: data.country, code: (data.country_code || '').toUpperCase() };
-          }
-        }
-      } catch (_) {}
-      return { name: 'Unknown', code: '' };
-    }
-
-    async function trackVisitStats() {
-      globalViews.textContent = 'total_visits: loading...';
-      try {
-        const r = await fetch('https://api.countapi.xyz/hit/smiles-structure-picker/main');
-        if (r.ok) {
-          const data = await r.json();
-          globalViews.textContent = `total_visits: ${data.value}`;
-        } else {
-          globalViews.textContent = 'total_visits: n/a';
-        }
-      } catch (_) {
-        globalViews.textContent = 'total_visits: n/a';
-      }
-
-      visitorCountry.textContent = 'country: locating...';
-      const country = await detectCountry();
-      const code = (country.code || '').toLowerCase();
-      const flag = countryCodeToFlag(country.code);
-      let usage = 'n/a';
-      if (code) {
-        try {
-          const r = await fetch(`https://api.countapi.xyz/hit/smiles-structure-picker/country-${code}`);
-          if (r.ok) {
-            const data = await r.json();
-            usage = String(data.value);
-          }
-        } catch (_) {}
-      }
-      visitorCountry.textContent = `country: ${flag ? `${flag} ` : ''}${country.name} (visits: ${usage})`;
     }
 
     function switchTab(name) {
@@ -1186,7 +1102,6 @@
     });
 
     initBinaryBackground();
-    trackVisitStats();
     updatePager();
     updateStats();
   </script>
